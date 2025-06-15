@@ -38,7 +38,6 @@ class PipelineDetector(Node):
             10
         )
 
-
     def _declare_and_initialize_parameters(self):
         self.declare_parameter('input_topic', '/lolo/sensors/mbes/bathymetry/points')
         self.input_topic = self.get_parameter('input_topic').get_parameter_value().string_value
@@ -142,7 +141,6 @@ class PipelineDetector(Node):
             ordered_pings[..., -1] /= mean_intensity
         return ordered_pings
 
-
     def detection_callback(self):
         """
         This callback is called at the specified detection frequency.
@@ -155,13 +153,19 @@ class PipelineDetector(Node):
         if intensity_dict is None:
             self.get_logger().warn('Not enough pings received to construct intensity image.')
             return None
-        intensity_image = intensity_dict['intensity_image']
+        gradient_image = intensity_dict['gradient_image']   # used to be intensity_dict['intensity_image']
         mask = intensity_dict['mask']
-        normalized_image = mbes_utils.normalize_intensity_image(intensity_image)
-        image_msg = self.cv_bridge.cv2_to_imgmsg(normalized_image, encoding='mono8')
+        #normalized_image = mbes_utils.normalize_intensity_image(intensity_image)
+        image = mbes_utils.img_to_uint8(gradient_image)
+        image_msg = self.cv_bridge.cv2_to_imgmsg(image, encoding='mono8')
 
         self.detection_image_pub.publish(image_msg)
-        # TODO: detection logic goes here
+    
+        pipeline, mid_x, mid_y, gradient_image_overlay = mbes_utils.pipeline_detect(image)
+        if pipeline:
+            self.get_logger().info(f'Pipeline detected at mid_x:,  mid_y: {mid_x}, {mid_y}')    # img coordinates atm
+        else:
+            self.get_logger().info('No pipeline detected in this patch.')
 
 
 def main(args=None):
