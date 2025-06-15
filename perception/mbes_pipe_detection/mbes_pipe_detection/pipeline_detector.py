@@ -2,6 +2,7 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Header
 from sensor_msgs.msg import PointCloud2, Image
+from geometry_msgs.msg import PointStamped
 from sensor_msgs_py import point_cloud2
 from cv_bridge import CvBridge
 from tf2_ros import Buffer, TransformListener
@@ -32,9 +33,19 @@ class PipelineDetector(Node):
 
         self.cv_bridge = CvBridge()
         self.create_timer(1.0 / self.detection_frequency, self.detection_callback)
+        self.gradient_image_pub = self.create_publisher(
+            Image,
+            'gradient_image',
+            10
+        )
         self.detection_image_pub = self.create_publisher(
             Image,
             'pipeline_detection_image',
+            10
+        )
+        self.pipeline_point_pub = self.create_publisher(
+            PointStamped,
+            'pipeline_point',
             10
         )
 
@@ -117,7 +128,7 @@ class PipelineDetector(Node):
         if self.last_centroid is not None:
             distance = np.linalg.norm(centroid - self.last_centroid)
             if distance < self.min_translation:
-                self.get_logger().warn(f'Ignoring ping due to small translation: {distance:.2f} < {self.min_translation:.2f}')
+                # self.get_logger().warn(f'Ignoring ping due to small translation: {distance:.2f} < {self.min_translation:.2f}')
                 return
 
         self.last_centroid = centroid
@@ -155,15 +166,31 @@ class PipelineDetector(Node):
             return None
         gradient_image = intensity_dict['gradient_image']   # used to be intensity_dict['intensity_image']
         mask = intensity_dict['mask']
-        #normalized_image = mbes_utils.normalize_intensity_image(intensity_image)
-        image = mbes_utils.img_to_uint8(gradient_image)
-        image_msg = self.cv_bridge.cv2_to_imgmsg(image, encoding='mono8')
-
-        self.detection_image_pub.publish(image_msg)
+        normalized_gradient_image = mbes_utils.normalize_image(gradient_image)
+        gradient_image_msg = self.cv_bridge.cv2_to_imgmsg(normalized_gradient_image, encoding='mono8')
+        self.gradient_image_pub.publish(gradient_image_msg)
     
-        pipeline, mid_x, mid_y, gradient_image_overlay = mbes_utils.pipeline_detect(image)
+        gradient_image_uint8 = mbes_utils.img_to_uint8(gradient_image)
+        pipeline, mid_x, mid_y, pipeline_image = mbes_utils.pipeline_detect(gradient_image_uint8)
         if pipeline:
             self.get_logger().info(f'Pipeline detected at mid_x:,  mid_y: {mid_x}, {mid_y}')    # img coordinates atm
+            self.detection_image_pub.publish(self.cv_bridge.cv2_to_imgmsg(pipeline_image, encoding='mono8'))
+            mid_x = int(mid_x)
+            mid_y = int(mid_y)
+            x = intensity_dict['x'][mid_y, mid_x]
+            y = intensity_dict['y'][mid_y, mid_x]
+            # publish xy coordinates in utm frame
+            point_msg = PointStamped()
+            point_msg.header = Header()
+            point_msg.header.frame_id = self.utm_frame
+            point_msg.header.stamp = self.get_clock().now().to_msg()
+            point_msg.point.x = x
+            point_msg.point.y = y
+            point_msg.point.z = 0.0
+            self.pipeline_point_pub.publish(point_msg)
+            self.get_logger().info(f'Published pipeline point at x: {x}, y: {y} in frame {self.utm_frame}')
+
+
         else:
             self.get_logger().info('No pipeline detected in this patch.')
 

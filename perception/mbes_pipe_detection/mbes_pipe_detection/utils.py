@@ -51,13 +51,15 @@ def pcl_buffer_to_intensity(pcl_buffer, resolution):
 
     mask = ~np.isnan(gradient_image)    # used to be mask = ~np.isnan(intensity_image) 
     return {
+        'x': X,
+        'y': Y,
         'intensity_image': intensity_image,
         'gradient_image': gradient_image,
         'mask': mask,
     }
 
 
-def normalize_intensity_image(intensity_image):
+def normalize_image(intensity_image):
     """
     Normalize the intensity image to the range [0, 255].
     """
@@ -98,7 +100,7 @@ def pipeline_detect(grad_img, mask=None, min_frac_in_mask=0.8):
     """
 
     # make Hough lines but the probabilistic kind
-    linesP = cv2.HoughLinesP(grad_img, 1, np.pi / 180, 20, None, 30, 25)
+    linesP = cv2.HoughLinesP(grad_img, 1, np.pi / 180, 20, None, 20, 50)
 
     pipeline = False
 
@@ -130,7 +132,7 @@ def pipeline_detect(grad_img, mask=None, min_frac_in_mask=0.8):
 
             # If we get here, the line is valid
             valid_lines += 1
-            cv2.line(grad_img, (x1, y1), (x2, y2), (0,0,255), 1, cv2.LINE_AA)
+            cv2.line(grad_img, (x1, y1), (x2, y2), (255,16,240), 1, cv2.LINE_AA)
             all_x.extend([x1, x2])
             all_y.extend([y1, y2])
 
