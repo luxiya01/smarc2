@@ -5,6 +5,8 @@ Utility functions for the MBES pipe detection module.
 import cv2
 import numpy as np
 from scipy.interpolate import griddata
+from skimage.restoration import denoise_bilateral
+from skimage.restoration import denoise_bilateral
 
 def pcl_buffer_to_intensity(pcl_buffer, resolution):
     """
@@ -46,6 +48,12 @@ def pcl_buffer_to_intensity(pcl_buffer, resolution):
         (X, Y),
         method='linear',
     )
+    Z = griddata(
+        (x.flatten(), y.flatten()),
+        z.flatten(),
+        (X, Y),
+        method='linear',
+    )
 
     gradient_image = np.gradient(intensity_image, axis=1)
 
@@ -53,6 +61,7 @@ def pcl_buffer_to_intensity(pcl_buffer, resolution):
     return {
         'x': X,
         'y': Y,
+        'z': Z,
         'intensity_image': intensity_image,
         'gradient_image': gradient_image,
         'mask': mask,
@@ -83,6 +92,44 @@ def img_to_uint8(image):
         image = np.nan_to_num(image, nan=0)  
         return image.astype(np.uint8)
 
+def process_intensity_image(intensity_dict):
+    intensity_image = intensity_dict['intensity_image']
+    intensity_image = np.where(np.isnan(intensity_image), np.nanmean(intensity_image), intensity_image)  # replace NaNs with 0
+    intensity_image = denoise_bilateral(
+        intensity_image,
+        sigma_color=0.3,
+        sigma_spatial=5,
+    )
+    intensity_image = ((intensity_image - np.min(intensity_image)) / (np.max(intensity_image) - np.min(intensity_image)) * 255).astype(np.uint8)
+    edges = cv2.Canny(intensity_image, 100, 150)
+    mask = intensity_dict['mask']
+    edges = np.logical_and(edges, mask)  # apply mask to edges
+
+    lines = cv2.HoughLinesP(edges.astype(np.uint8), 1, np.pi / 180,
+                            threshold=10,
+                            minLineLength=50,
+                            maxLineGap=20)
+    return lines
+
+def draw_lines_on_image(image, lines):
+    """
+    Draw lines on the given image.
+
+    Parameters:
+    - image: 2D numpy array representing the image.
+    - lines: list of lines to draw, where each line is represented as a tuple (x1, y1, x2, y2).
+
+    Returns:
+    - image_with_lines: The input image with lines drawn on it.
+    """
+    image_with_lines = image.copy()
+    if lines is not None:
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            cv2.line(image_with_lines, (x1, y1), (x2, y2), (255, 16, 240), 1, cv2.LINE_AA)
+    return image_with_lines
+
+
 
 def pipeline_detect(grad_img, mask=None, min_frac_in_mask=0.8):
     """
@@ -100,7 +147,12 @@ def pipeline_detect(grad_img, mask=None, min_frac_in_mask=0.8):
     """
 
     # make Hough lines but the probabilistic kind
-    linesP = cv2.HoughLinesP(grad_img, 1, np.pi / 180, 20, None, 20, 50)
+    # linesP = cv2.HoughLinesP(grad_img, 1, np.pi / 180, 20, None, 20, 50)
+    linesP = cv2.HoughLinesP(grad_img, 1, np.pi / 180,
+                            threshold=10,
+                            minLineLength=50,
+                            maxLineGap=20)
+
 
     pipeline = False
 
